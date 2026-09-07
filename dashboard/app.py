@@ -166,7 +166,7 @@ st.markdown(
     <div class="main-header">
         <div style="display: flex; justify-content: space-between; align-items: center;">
             <div>
-                <h1 style="margin: 0; font-size: 1.9rem; font-weight: 700;">Egreen Quanta</h1>
+                <h1 style="margin: 0; font-size: 1.9rem; font-weight: 700;">Maritime Q</h1>
                 <p style="margin: 4px 0 0 0; font-size: 1rem; color: #93c5fd;">
                     Quantum-Inspired Multi-Objective Green Fleet Optimization (MOQPSO) & Fuel Decarbonization Dashboard
                 </p>
@@ -388,163 +388,185 @@ tab_viz, tab_details, tab_baseline, tab_reports = st.tabs([
 
 # --- TAB 1: Visualizations ---
 with tab_viz:
-    col_chart, col_picker = st.columns([7, 3])
+    # ── Resolve preset quick-selects first (before rendering chart) ──────────
+    min_cost_idx = int(df_pareto.loc[df_pareto["Cost_USD"].idxmin()]["Index"])
+    min_ghg_idx  = int(df_pareto.loc[df_pareto["GHG_Tons"].idxmin()]["Index"])
+    max_rel_idx  = int(df_pareto.loc[df_pareto["OnTime_Legs"].idxmax()]["Index"])
 
-    with col_picker:
-        st.subheader("🎯 Solution Selector")
-        # Quick presets
-        min_cost_idx = int(df_pareto.loc[df_pareto["Cost_USD"].idxmin()]["Index"])
-        min_ghg_idx = int(df_pareto.loc[df_pareto["GHG_Tons"].idxmin()]["Index"])
-        max_rel_idx = int(df_pareto.loc[df_pareto["OnTime_Legs"].idxmax()]["Index"])
+    preset_cols = st.columns([1, 1, 1, 5])
+    with preset_cols[0]:
+        if st.button("💰 Min Cost", key="btn_min_cost"):
+            st.session_state["selected_sol_idx"] = min_cost_idx
+    with preset_cols[1]:
+        if st.button("🌱 Min GHG", key="btn_min_ghg"):
+            st.session_state["selected_sol_idx"] = min_ghg_idx
+    with preset_cols[2]:
+        if st.button("⏱️ Max ETA", key="btn_max_eta"):
+            st.session_state["selected_sol_idx"] = max_rel_idx
 
-        st.caption("Quick Selection Presets:")
-        cp_cols = st.columns(3)
-        with cp_cols[0]:
-            if st.button("💰 Min Cost"):
-                st.session_state["selected_sol_idx"] = min_cost_idx
-        with cp_cols[1]:
-            if st.button("🌱 Zero GHG"):
-                st.session_state["selected_sol_idx"] = min_ghg_idx
-        with cp_cols[2]:
-            if st.button("⏱️ Max ETA"):
-                st.session_state["selected_sol_idx"] = max_rel_idx
+    # ── Chart type toggle ────────────────────────────────────────────────────
+    chart_mode = st.radio(
+        "Plot Type:",
+        ["2D Scatter (Cost vs GHG)", "3D Trade-off (Cost vs GHG vs Reliability)"],
+        horizontal=True,
+        key="chart_mode_radio",
+    )
 
-        curr_sel = st.session_state.get("selected_sol_idx", 0)
-        selected_idx = st.selectbox(
-            "Select Solution Index off Front:",
-            options=df_pareto["Index"].tolist(),
-            index=int(curr_sel) if curr_sel in df_pareto["Index"].values else 0,
-            format_func=lambda x: f"Sol #{x+1} — ${df_pareto.loc[x, 'Cost_USD']:,.0f} | {df_pareto.loc[x, 'GHG_Tons']:,.1f}t CO2 | {df_pareto.loc[x, 'OnTime_Legs']:.0f} on-time",
-            key="sol_dropdown",
+    curr_sel = st.session_state.get("selected_sol_idx", 0)
+    selected_idx = st.selectbox(
+        "Select Solution Index off Pareto Front:",
+        options=df_pareto["Index"].tolist(),
+        index=int(curr_sel) if curr_sel in df_pareto["Index"].values else 0,
+        format_func=lambda x: f"Sol #{x+1} — ${df_pareto.loc[x, 'Cost_USD']:,.0f} | {df_pareto.loc[x, 'GHG_Tons']:,.1f} t CO2 | {df_pareto.loc[x, 'OnTime_Legs']:.0f} on-time legs",
+        key="sol_dropdown",
+    )
+    st.session_state["selected_sol_idx"] = selected_idx
+    sel_row = df_pareto.loc[selected_idx]
+
+    st.markdown("---")
+
+    # ── FULL-WIDTH chart ─────────────────────────────────────────────────────
+    st.subheader("📊 Pareto Optimal Trade-off Surface (MOQPSO)")
+
+    if "2D" in chart_mode:
+        fig = px.scatter(
+            df_pareto,
+            x="Cost_USD",
+            y="GHG_Tons",
+            color="OnTime_Legs",
+            size=[16 if i == selected_idx else 10 for i in df_pareto["Index"]],
+            hover_name="Solution",
+            hover_data={"Cost_USD": ":$,.0f", "GHG_Tons": ":,.1f", "OnTime_Legs": True, "Unmet_Demand": ":,.0f"},
+            labels={"Cost_USD": "Total Fuel Cost ($)", "GHG_Tons": "Lifecycle GHG Emissions (tons CO2eq)", "OnTime_Legs": "On-Time Legs"},
+            color_continuous_scale="Viridis",
         )
-        st.session_state["selected_sol_idx"] = selected_idx
+        fig.add_trace(
+            go.Scatter(
+                x=[sel_row["Cost_USD"]],
+                y=[sel_row["GHG_Tons"]],
+                mode="markers",
+                marker=dict(size=22, color="rgba(0,0,0,0)", line=dict(color="#f43f5e", width=3)),
+                name=f"Selected Sol #{selected_idx+1}",
+                showlegend=True,
+            )
+        )
+        fig.update_layout(
+            template="plotly_dark",
+            height=650,
+            margin=dict(l=60, r=40, t=50, b=60),
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(17, 27, 43, 0.6)",
+            xaxis=dict(title_font_size=14, tickfont_size=12),
+            yaxis=dict(title_font_size=14, tickfont_size=12),
+            legend=dict(font_size=12),
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        fig_3d = px.scatter_3d(
+            df_pareto,
+            x="Cost_USD",
+            y="GHG_Tons",
+            z="OnTime_Legs",
+            color="GHG_Tons",
+            hover_name="Solution",
+            labels={"Cost_USD": "Cost ($)", "GHG_Tons": "GHG (t CO2eq)", "OnTime_Legs": "On-Time Legs"},
+            color_continuous_scale="Turbo",
+        )
+        fig_3d.update_traces(marker_size=6)
+        fig_3d.update_layout(
+            template="plotly_dark",
+            height=720,
+            margin=dict(l=0, r=0, t=30, b=0),
+            paper_bgcolor="rgba(0,0,0,0)",
+            scene=dict(
+                xaxis_title="Cost ($)",
+                yaxis_title="GHG (t CO2eq)",
+                zaxis_title="On-Time Legs",
+                xaxis=dict(backgroundcolor="rgba(17,27,43,0.6)"),
+                yaxis=dict(backgroundcolor="rgba(17,27,43,0.6)"),
+                zaxis=dict(backgroundcolor="rgba(17,27,43,0.6)"),
+            ),
+        )
+        st.plotly_chart(fig_3d, use_container_width=True)
 
-        sel_row = df_pareto.loc[selected_idx]
-        st.markdown("---")
+    st.markdown("---")
+
+    # ── Solution details + KPI side-by-side below chart ──────────────────────
+    col_sel_details, col_kpis = st.columns([2, 3])
+
+    with col_sel_details:
+        st.subheader("🎯 Selected Solution Details")
         st.markdown(
             f"""
-            **Selected Solution #{selected_idx+1} KPIs:**
-            - 💵 Fuel Cost: **${sel_row['Cost_USD']:,.2f}**
-            - 💨 GHG Emissions: **{sel_row['GHG_Tons']:,.2f} t CO2eq**
-            - ⏰ Schedule Reliability: **{sel_row['OnTime_Legs']:.0f}/{len(routes)} ({sel_row['Reliability_Pct']:.0f}%)**
-            - 📦 Unmet Cargo Demand: **{sel_row['Unmet_Demand']:,.0f} tons**
-            - ⚖️ Feasibility: **{'100% Compliant' if sel_row['CII_Violations'] == 0 and sel_row['Fuel_Violations'] == 0 else f'{sel_row["CII_Violations"]} CII / {sel_row["Fuel_Violations"]} Fuel Violations'}**
+            **Solution #{selected_idx+1} at a Glance:**
+            | Metric | Value |
+            |--------|-------|
+            | 💵 Fuel Cost | **${sel_row['Cost_USD']:,.2f}** |
+            | 💨 GHG Emissions | **{sel_row['GHG_Tons']:,.2f} t CO2eq** |
+            | ⏰ Schedule Reliability | **{sel_row['OnTime_Legs']:.0f}/{len(routes)} legs ({sel_row['Reliability_Pct']:.0f}%)** |
+            | 📦 Unmet Cargo Demand | **{sel_row['Unmet_Demand']:,.0f} tons** |
+            | ⚖️ Feasibility | **{'✅ 100% Compliant' if sel_row['CII_Violations'] == 0 and sel_row['Fuel_Violations'] == 0 else f'⚠️ {sel_row["CII_Violations"]} CII / {sel_row["Fuel_Violations"]} Fuel Violations'}** |
             """
         )
 
-    with col_chart:
-        st.subheader("Pareto Optimal Trade-off Surface (MOQPSO)")
-        chart_mode = st.radio("Plot Type:", ["2D Scatter (Cost vs GHG)", "3D Trade-off (Cost vs GHG vs Reliability)"], horizontal=True)
-
-        if "2D" in chart_mode:
-            fig = px.scatter(
-                df_pareto,
-                x="Cost_USD",
-                y="GHG_Tons",
-                color="OnTime_Legs",
-                size=[14 if i == selected_idx else 9 for i in df_pareto["Index"]],
-                hover_name="Solution",
-                hover_data={"Cost_USD": ":$,.0f", "GHG_Tons": ":,.1f", "OnTime_Legs": True, "Unmet_Demand": ":,.0f"},
-                labels={"Cost_USD": "Total Fuel Cost ($)", "GHG_Tons": "Lifecycle GHG Emissions (tons CO2eq)", "OnTime_Legs": "On-Time Legs"},
-                color_continuous_scale="Viridis",
-            )
-            # Highlight selected point
-            fig.add_trace(
-                go.Scatter(
-                    x=[sel_row["Cost_USD"]],
-                    y=[sel_row["GHG_Tons"]],
-                    mode="markers",
-                    marker=dict(size=20, color="rgba(0,0,0,0)", line=dict(color="#f43f5e", width=3)),
-                    name=f"Selected Sol #{selected_idx+1}",
-                    showlegend=True,
-                )
-            )
-            fig.update_layout(
-                template="plotly_dark",
-                height=450,
-                margin=dict(l=20, r=20, t=30, b=20),
-                paper_bgcolor="rgba(0,0,0,0)",
-                plot_bgcolor="rgba(17, 27, 43, 0.6)",
-            )
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            fig_3d = px.scatter_3d(
-                df_pareto,
-                x="Cost_USD",
-                y="GHG_Tons",
-                z="OnTime_Legs",
-                color="GHG_Tons",
-                hover_name="Solution",
-                labels={"Cost_USD": "Cost ($)", "GHG_Tons": "GHG (t)", "OnTime_Legs": "On-Time"},
-                color_continuous_scale="Turbo",
-            )
-            fig_3d.update_layout(
-                template="plotly_dark",
-                height=480,
-                margin=dict(l=0, r=0, t=10, b=0),
-                paper_bgcolor="rgba(0,0,0,0)",
-            )
-            st.plotly_chart(fig_3d, use_container_width=True)
-
-    # --- Executive KPI Banners for Selected Solution ---
+    # ── Executive KPI Banners for Selected Solution ───────────────────────────
     selected_solution = pareto_solutions[selected_idx]
     plan = selected_solution.attributes["plan"]
-
-    st.markdown("### 🏆 Deployment Key Performance Indicators")
-    kpi1, kpi2, kpi3, kpi4 = st.columns(4)
 
     green_fuels = ["Hydrogen", "Ammonia", "Methanol", "LNG"]
     green_cargo = sum(a.cargo_load_tons for a in plan.assignments if a.fuel_type in green_fuels)
     total_cargo = max(1.0, sum(a.cargo_load_tons for a in plan.assignments))
     green_share = (green_cargo / total_cargo) * 100.0
 
-    with kpi1:
-        st.markdown(
-            f"""
-            <div class="kpi-card">
-                <div class="kpi-title">Total Fuel Cost</div>
-                <div class="kpi-value">${plan.raw_j1_cost:,.0f}</div>
-                <div class="kpi-subtitle">Average: ${plan.raw_j1_cost/max(1,len(plan.assignments)):,.0f}/voyage</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+    with col_kpis:
+        st.subheader("🏆 Deployment KPIs")
+        kpi1, kpi2 = st.columns(2)
+        kpi3, kpi4 = st.columns(2)
 
-    with kpi2:
-        st.markdown(
-            f"""
-            <div class="kpi-card">
-                <div class="kpi-title">Lifecycle GHG Emissions</div>
-                <div class="kpi-value">{plan.raw_j2_emissions/1000.0:,.1f} <span style="font-size:1rem;">t CO2eq</span></div>
-                <div class="kpi-subtitle">Well-to-wake cumulative footprint</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-    with kpi3:
-        st.markdown(
-            f"""
-            <div class="kpi-card">
-                <div class="kpi-title">Schedule Reliability</div>
-                <div class="kpi-value">{plan.raw_j3_reliability:.0f} / {len(routes)}</div>
-                <div class="kpi-subtitle">{(plan.raw_j3_reliability/len(routes))*100:.0f}% Voyage legs meeting target ETA</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-    with kpi4:
-        st.markdown(
-            f"""
-            <div class="kpi-card">
-                <div class="kpi-title">Green Cargo Share</div>
-                <div class="kpi-value">{green_share:.0f}%</div>
-                <div class="kpi-subtitle">{green_cargo:,.0f} tons via LNG/MeOH/H2/NH3</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+        with kpi1:
+            st.markdown(
+                f"""
+                <div class="kpi-card">
+                    <div class="kpi-title">Total Fuel Cost</div>
+                    <div class="kpi-value">${plan.raw_j1_cost:,.0f}</div>
+                    <div class="kpi-subtitle">Avg: ${plan.raw_j1_cost/max(1,len(plan.assignments)):,.0f}/voyage</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+        with kpi2:
+            st.markdown(
+                f"""
+                <div class="kpi-card">
+                    <div class="kpi-title">Lifecycle GHG Emissions</div>
+                    <div class="kpi-value">{plan.raw_j2_emissions/1000.0:,.1f} <span style="font-size:1rem;">t CO2eq</span></div>
+                    <div class="kpi-subtitle">Well-to-wake cumulative</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+        with kpi3:
+            st.markdown(
+                f"""
+                <div class="kpi-card">
+                    <div class="kpi-title">Schedule Reliability</div>
+                    <div class="kpi-value">{plan.raw_j3_reliability:.0f} / {len(routes)}</div>
+                    <div class="kpi-subtitle">{(plan.raw_j3_reliability/len(routes))*100:.0f}% legs on target ETA</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+        with kpi4:
+            st.markdown(
+                f"""
+                <div class="kpi-card">
+                    <div class="kpi-title">Green Cargo Share</div>
+                    <div class="kpi-value">{green_share:.0f}%</div>
+                    <div class="kpi-subtitle">{green_cargo:,.0f} t via LNG/MeOH/H₂/NH₃</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
 
 
 # --- TAB 2: Fleet Allocation & Breakdown ---
